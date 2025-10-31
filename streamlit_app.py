@@ -59,13 +59,13 @@ def merge_data(fx_df, fred_dict):
  # Flatten MultiIndex columns if present
    if isinstance(df.columns, pd.MultiIndex):
         df.columns = ['_'.join(map(str, col)).strip() for col in df.columns.values]
-   for symbol, data in fred_dict.items():      
+      for symbol, data in fred_dict.items():      
    if not data.empty:
 # Flatten FRED data columns if needed
       if isinstance(data.columns, pd.MultiIndex):
                 data.columns = ['_'.join(map(str, col)).strip() for col in data.columns.values]
-      df = df.join(data, how="left")
-   df = df.ffill().dropna()
+       df = df.join(data, how="left")
+       df = df.ffill().dropna()
    return df
 
 def compute_correlation(df):

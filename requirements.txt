@@ -1,5 +1,5 @@
 streamlit>=1.50
 pandas>=2.0
 yfinance>=0.2.66
-pandas_datareader>=0.10
+fredapi>=0.5.1
 matplotlib>=3.8

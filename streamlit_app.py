@@ -95,7 +95,7 @@ with st.sidebar:
        selected_macros.append(custom_symbol)
 
 # ---------------------------------------------
-# Fetch and Display Data
+# Data Fetching
 # ---------------------------------------------
 st.info("Fetching data...")
 
@@ -103,23 +103,28 @@ fx_data = get_fx_data()
 if fx_data.empty:
    st.stop()
 
-fred_data = {symbol: get_fred_data(symbol, start_date, end_date) for symbol in selected_macros}
+fred_data = {}
+for symbol in selected_macros:
+   fred_data[symbol] = get_fred_data(symbol, start_date, end_date)
+
 merged = merge_data(fx_data, fred_data)
 
 if merged.empty:
    st.error("No merged data available to display.")
    st.stop()
 
+# ---------------------------------------------
+# Display Data
+# ---------------------------------------------
 st.subheader("📊 Data Preview")
 st.dataframe(merged.tail(10))
 
 corr_matrix = compute_correlation(merged)
 if not corr_matrix.empty:
-   st.subheader("📈 Correlation Matrix (Returns)")
+   st.subheader("📈 Correlation Matrix (Daily Returns)")
    st.dataframe(corr_matrix.style.background_gradient(cmap="RdBu_r", axis=None))
 else:
    st.warning("Not enough data to compute correlation matrix.")
-
 # ---------------------------------------------
 # Plot Section
 # ---------------------------------------------

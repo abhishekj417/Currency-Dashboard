@@ -1,7 +1,6 @@
-streamlit
-pandas
+streamlit>=1.20
+pandas>=1.5
 numpy
 yfinance
-fredapi
-plotly
-requests
+pandas_datareader
+matplotlib

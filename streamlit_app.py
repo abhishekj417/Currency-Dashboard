@@ -55,9 +55,13 @@ def merge_data(fx_df, fred_dict):
    """Combine FX and FRED macro data into one DataFrame."""
    if fx_df.empty:
        return pd.DataFrame()
-   df = fx_df.copy()
-   for symbol, data in fred_dict.items():
-       if not data.empty:
+   df = fx_df.copy() 
+ # Flatten MultiIndex columns if present
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = ['_'.join(map(str, col)).strip() for col in df.columns.values]
+   for symbol, data in fred_dict.items():      
+if isinstance(data.columns, pd.MultiIndex):
+                data.columns = ['_'.join(map(str, col)).strip() for col in data.columns.values]
            df = df.join(data, how="left")
    df = df.ffill().dropna()
    return df

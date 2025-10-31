@@ -132,7 +132,7 @@ else:
 st.subheader("📉 USD/CHF vs Macroeconomic Indicators")
 
 fig, ax1 = plt.subplots(figsize=(10, 4))
-st.write("Merged columns:", merged.columns.tolist()
+st.write("Merged columns:", merged.columns.tolist())
 ax1.plot(merged.index, merged["USDCHF"], label="USD/CHF", color="blue")
 ax1.set_ylabel("USD/CHF", color="blue")
 ax1.tick_params(axis="y", labelcolor="blue")

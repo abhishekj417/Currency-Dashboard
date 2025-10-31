@@ -3,8 +3,8 @@ import streamlit as st
 import pandas as pd
 import datetime
 import yfinance as yf
-from pandas_datareader import data as pdr
 import matplotlib.pyplot as plt
+from fredapi import Fred
 
 # ---------------------------------------------
 # Streamlit Page Setup

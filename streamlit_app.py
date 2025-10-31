@@ -1,157 +1,165 @@
 # streamlit_app.py
 import streamlit as st
 import pandas as pd
-import numpy as np
 import datetime
 import yfinance as yf
 from pandas_datareader import data as pdr
 import matplotlib.pyplot as plt
-# ---- Config ----
-st.set_page_config(page_title="USD/CHF Correlation Dashboard", layout="wide")
-# ---- Helpers ----
+
+# ---------------------------------------------
+# Streamlit Page Setup
+# ---------------------------------------------
+st.set_page_config(
+   page_title="USD/CHF Macro Correlation Dashboard",
+   layout="wide"
+)
+
+st.title("💹 USD/CHF Correlation Dashboard")
+st.markdown("Analyze the relationship between USD/CHF and key macroeconomic indicators.")
+
+# ---------------------------------------------
+# Helper functions
+# ---------------------------------------------
+
 @st.cache_data(ttl=3600)
-def fetch_fx(ticker="CHF=X", start=None, end=None):
+def get_fx_data():
    """
-   Fetch FX price series via yfinance.
-   Ticker 'CHF=X' is commonly used for USD/CHF (check your data provider if you disagree).
-   Returns daily Close prices as dataframe with column 'Close'.
+   Fetch USD/CHF monthly data from Yahoo Finance.
+   Uses CHF=X ticker (USD/CHF pair).
    """
-   start = start or (datetime.date.today() - datetime.timedelta(days=365*3))
-   end = end or datetime.date.today()
    try:
-       df = yf.download(ticker, start=start, end=end, progress=False)
-       if df is None or df.empty:
+       fx = yf.download("CHF=X", start="1995-01-01", interval="1mo", progress=False)
+       if fx.empty:
+           st.error("No FX data returned from Yahoo Finance.")
            return pd.DataFrame()
-       df = df[['Close']].rename(columns={'Close': 'USDCHF'})
+       fx = fx['Close']
+       fx.name = "USDCHF"
+       fx.index = fx.index.to_period('M').to_timestamp()
+       return fx
+   except Exception as e:
+       st.error(f"Error fetching FX data: {e}")
+       return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_fred_data(symbol, start, end):
+   """
+   Fetch macroeconomic data from FRED using pandas_datareader.
+   """
+   try:
+       df = pdr.DataReader(symbol, "fred", start, end)
+       if df.empty:
+           st.warning(f"No data found for {symbol}")
+           return pd.DataFrame()
        df.index = pd.to_datetime(df.index)
+       df.columns = [symbol]
        return df
    except Exception as e:
-       st.error(f"Failed to fetch FX data: {e}")
+       st.warning(f"Failed to fetch {symbol} from FRED: {e}")
        return pd.DataFrame()
-@st.cache_data(ttl=3600)
-def fetch_fred_series(symbol, start=None, end=None):
+
+def merge_data(fx_series, fred_dict):
    """
-   Fetch macro series from FRED via pandas_datareader.
-   Example symbols: 'CPIAUCSL' (US CPI), 'UNRATE' (Unemployment Rate), 'DGS10' (10yr Treasury).
+   Combine FX and FRED macro data into one DataFrame.
    """
-   start = start or (datetime.date.today() - datetime.timedelta(days=365*5))
-   end = end or datetime.date.today()
-   try:
-       df = pdr.DataReader(symbol, 'fred', start, end)
-       if df is None or df.empty:
-           return pd.DataFrame()
-       df.index = pd.to_datetime(df.index)
-       return df.rename(columns={df.columns[0]: symbol})
-   except Exception as e:
-       st.warning(f"Could not fetch {symbol} from FRED: {e}")
+   if fx_series.empty:
        return pd.DataFrame()
-def prepare_data(fx_df, macro_dfs):
+
+   df = fx_series.to_frame()
+   for symbol, macro_df in fred_dict.items():
+       if not macro_df.empty:
+           df = df.join(macro_df, how="left")
+   df = df.ffill().dropna()
+   return df
+
+def compute_correlation(df):
    """
-   Align FX and macro on business days and compute pct_change or level as appropriate.
-   Returns a merged DataFrame with daily aligned data and % returns where applicable.
+   Compute static correlation matrix between USDCHF and macro variables.
    """
-   # Resample quarterly/monthly macro to forward-fill to daily (common practice)
-   # Convert macro frequency to daily by forward filling
-   merged = fx_df.copy()
-   for name, df in macro_dfs.items():
-       if df.empty:
-           continue
-       # upsample macro to daily and forward fill
-       df_daily = df.reindex(pd.date_range(df.index.min(), fx_df.index.max(), freq='D'))
-       df_daily = df_daily.ffill()
-       merged = merged.join(df_daily, how='left')
-   merged = merged.dropna(how='all')
-   return merged
-def compute_correlations(df, window=None):
-   """
-   Compute correlation matrix of daily returns (for FX) and changes for macros.
-   If window is provided (int days), compute rolling correlation between USDCHF returns and each macro series.
-   """
-   result = {}
-   # Convert FX to returns
-   df_returns = pd.DataFrame()
-   if 'USDCHF' in df.columns:
-       df_returns['USDCHF_ret'] = df['USDCHF'].pct_change()
-   # For macro series, compute pct_change if numeric (use pct_change to capture movement)
-   for col in df.columns:
-       if col == 'USDCHF':
-           continue
-       series = df[col]
-       # if series has many repeating values (like daily forward-filled monthly), pct_change is OK
-       df_returns[f"{col}_chg"] = series.pct_change()
-   corr_matrix = df_returns.corr()
-   result['corr_matrix'] = corr_matrix
-   if window:
-       rolling = {}
-       for col in df_returns.columns:
-           if col == 'USDCHF_ret':
-               continue
-           rolling[col] = df_returns['USDCHF_ret'].rolling(window).corr(df_returns[col])
-       result['rolling'] = pd.DataFrame(rolling)
-   else:
-       result['rolling'] = pd.DataFrame()
-   return result
-# ---- UI ----
-st.title("USD/CHF Correlation Dashboard — Quick & Dirty (robust)")
+   if df.empty:
+       return pd.DataFrame()
+   df_ret = df.pct_change().dropna()
+   return df_ret.corr()
+
+# ---------------------------------------------
+# Sidebar
+# ---------------------------------------------
 with st.sidebar:
    st.header("Settings")
+
    today = datetime.date.today()
-   default_start = today - datetime.timedelta(days=365*3)
-   start_date = st.date_input("Start date", default_start)
-   end_date = st.date_input("End date", today)
-   window = st.number_input("Rolling window (days, 0 = none)", min_value=0, max_value=365, value=90, step=1)
-   st.markdown("**Macro series to include (FRED symbols)**")
-   # Provide default list but allow editing
-   default_macros = {
-       "US CPI (CPIAUCSL)": "CPIAUCSL",
-       "US Unemployment Rate (UNRATE)": "UNRATE",
-       "US 10Y Treasury Yield (DGS10)": "DGS10"
+   default_start = today - datetime.timedelta(days=5*365)
+   start_date = st.date_input("Start Date", default_start)
+   end_date = st.date_input("End Date", today)
+
+   st.subheader("Select Macro Indicators (FRED Symbols)")
+   macros = {
+       "US CPI": "CPIAUCSL",
+       "Unemployment Rate": "UNRATE",
+       "10Y Treasury Yield": "DGS10",
+       "Fed Funds Rate": "FEDFUNDS"
    }
-   # Allow user to select which ones to include
-   macros_selected = []
-   for label, symbol in default_macros.items():
-       if st.checkbox(f"{label} — {symbol}", value=True):
-           macros_selected.append(symbol)
-   # Allow adding a custom FRED symbol
-   custom_symbol = st.text_input("Add custom FRED symbol (optional)", value="")
-   if custom_symbol.strip():
-       macros_selected.append(custom_symbol.strip().upper())
-st.info("Fetching data... (this may take a few seconds)")
-# Fetch FX
-fx_df = fetch_fx("CHF=X", start=start_date, end=end_date)
-if fx_df.empty:
-   st.error("No FX data. Make sure you have internet access and that the ticker is correct ('CHF=X' used).")
+
+   selected_macros = [symbol for label, symbol in macros.items()
+                      if st.checkbox(f"{label} ({symbol})", value=True)]
+
+   custom_symbol = st.text_input("Add Custom FRED Symbol (optional)").strip().upper()
+   if custom_symbol:
+       selected_macros.append(custom_symbol)
+
+# ---------------------------------------------
+# Data Fetching
+# ---------------------------------------------
+st.info("Fetching data...")
+
+fx_data = get_fx_data()
+if fx_data.empty:
    st.stop()
-# Fetch macros
-macro_dfs = {}
-for symbol in set(macros_selected):
-   df = fetch_fred_series(symbol, start=start_date, end=end_date)
-   macro_dfs[symbol] = df
-merged = prepare_data(fx_df, macro_dfs)
-st.subheader("Data preview")
+
+fred_data = {}
+for symbol in selected_macros:
+   fred_data[symbol] = get_fred_data(symbol, start_date, end_date)
+
+merged = merge_data(fx_data, fred_data)
+
+if merged.empty:
+   st.error("No merged data available to display.")
+   st.stop()
+
+# ---------------------------------------------
+# Display Data
+# ---------------------------------------------
+st.subheader("📊 Data Preview")
 st.dataframe(merged.tail(10))
-corrs = compute_correlations(merged, window=(window if window > 0 else None))
-st.subheader("Correlation matrix (returns/changes)")
-if 'corr_matrix' in corrs and not corrs['corr_matrix'].empty:
-   st.dataframe(corrs['corr_matrix'])
+
+corr_matrix = compute_correlation(merged)
+if not corr_matrix.empty:
+   st.subheader("📈 Correlation Matrix (Daily Returns)")
+   st.dataframe(corr_matrix.style.background_gradient(cmap="RdBu_r", axis=None))
 else:
-   st.write("No usable correlation data (not enough data points).")
-if window > 0 and not corrs['rolling'].empty:
-   st.subheader(f"Rolling correlation with USD/CHF returns — window {window} days")
-   rolling_df = corrs['rolling'].dropna(how='all')
-   if rolling_df.empty:
-       st.write("Not enough data for rolling correlations.")
-   else:
-       # Show interactive plot per series
-       st.line_chart(rolling_df)
-# Plot price series
-st.subheader("Price / Macro series (time series)")
-fig, ax = plt.subplots(figsize=(10, 4))
-ax.plot(merged.index, merged['USDCHF'], label='USD/CHF')
-ax.set_ylabel("USD/CHF (price)")
-ax.set_title("USD/CHF price")
-ax.grid(True)
-ax.legend()
+   st.warning("Not enough data to compute correlation matrix.")
+
+# ---------------------------------------------
+# Plot USD/CHF and Macro Series
+# ---------------------------------------------
+st.subheader("📉 USD/CHF vs Macroeconomic Indicators")
+
+fig, ax1 = plt.subplots(figsize=(10, 4))
+ax1.plot(merged.index, merged["USDCHF"], label="USD/CHF", color="blue")
+ax1.set_ylabel("USD/CHF", color="blue")
+ax1.tick_params(axis='y', labelcolor='blue')
+ax1.grid(True)
+
+ax2 = ax1.twinx()
+for symbol in selected_macros:
+   if symbol in merged.columns:
+       ax2.plot(merged.index, merged[symbol], label=symbol)
+ax2.set_ylabel("Macro Indicators", color="gray")
+ax2.tick_params(axis='y', labelcolor='gray')
+
+lines, labels = ax1.get_legend_handles_labels()
+lines2, labels2 = ax2.get_legend_handles_labels()
+ax2.legend(lines + lines2, labels + labels2, loc="upper left")
+
 st.pyplot(fig)
-st.markdown("---")
-st.caption("If any series failed to load, you'll see warnings above. Expand settings to change dates or add symbols.")
+
+st.caption("Data sources: Yahoo Finance (USD/CHF) and FRED (Macroeconomic Indicators).")
